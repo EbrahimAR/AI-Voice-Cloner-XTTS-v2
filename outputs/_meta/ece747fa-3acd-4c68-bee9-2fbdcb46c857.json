@@ -1,0 +1,16 @@
+{
+  "id": "ece747fa-3acd-4c68-bee9-2fbdcb46c857",
+  "created": "2025-09-08T02:26:57.051998",
+  "wav": "xtts_20250908_022644_norm.wav",
+  "text": "Hello! This is my cloned voice running from a Streamlit web app.",
+  "language": "en",
+  "style": "neutral",
+  "reference": "ref_1757294804.wav",
+  "extras": {
+    "device": "cpu",
+    "normalized": true,
+    "speed": null,
+    "emotion": null,
+    "accent": "Australian"
+  }
+}

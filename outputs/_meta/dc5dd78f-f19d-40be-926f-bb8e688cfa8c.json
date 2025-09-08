@@ -1,0 +1,15 @@
+{
+  "id": "dc5dd78f-f19d-40be-926f-bb8e688cfa8c",
+  "created": "2025-09-08T03:14:07.947853",
+  "wav": "xtts_20250908_031356_norm.wav",
+  "text": "مرحباً! هذا صوتي المُستنسخ من تطبيق ويب Streamlit.",
+  "language": "en",
+  "style": "neutral",
+  "reference": "myvoice.wav",
+  "extras": {
+    "device": "cpu",
+    "normalized": true,
+    "speed": null,
+    "emotion": null
+  }
+}

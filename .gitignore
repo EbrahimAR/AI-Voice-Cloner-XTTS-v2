@@ -16,6 +16,3 @@ Thumbs.db
 # Streamlit cache
 .streamlit/
 
-# Audio outputs & metadata
-voices/
-outputs/
