@@ -39,21 +39,21 @@ Supports uploading, recording, or selecting reference voices and generating natu
 ---
 
 ## 📂 Project Structure
-  voice_clone_app/
-  │
-  ├── outputs/                  # Generated outputs (auto-created)
-  │   └── xtts_*.wav            # Generated files
-  │
-  ├── voices/                   # Reference voices (auto-created)
-  │   ├── ref_*.wav             # Uploaded/recorded samples
-  │
-  ├── app.py                    # Main Streamlit application
-  ├── run_app.py                # Launcher (cross-platform, auto-opens browser)
-  ├── test.py                   # Experimental/testing script
-  ├── requirements.txt          # Python dependencies
-  ├── LICENSE                   # Open-source license
-  ├── .gitignore                # Ignored files/folders
-  └── README.md                 # Project documentation
+    voice_clone_app/
+    │
+    ├── outputs/                  # Generated outputs (auto-created)
+    │   └── xtts_*.wav            # Generated files
+    │
+    ├── voices/                   # Reference voices (auto-created)
+    │   ├── ref_*.wav             # Uploaded/recorded samples
+    │
+    ├── app.py                    # Main Streamlit application
+    ├── run_app.py                # Launcher (cross-platform, auto-opens browser)
+    ├── test.py                   # Experimental/testing script
+    ├── requirements.txt          # Python dependencies
+    ├── LICENSE                   # Open-source license
+    ├── .gitignore                # Ignored files/folders
+    └── README.md                 # Project documentation
 
 
 ---
