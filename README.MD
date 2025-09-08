@@ -82,9 +82,9 @@ pip install -r requirements.txt
 
 ### **4. Install system dependencies**
 - **ffmpeg** is required for MP3 conversion:
-  -- Windows: `choco install ffmpeg`
-  -- macOS: `brew install ffmpeg`
-  -- Linux: `sudo apt-get install ffmpeg`
+  - Windows: `choco install ffmpeg`
+  - macOS: `brew install ffmpeg`
+  - Linux: `sudo apt-get install ffmpeg`
 
 ## ▶️ Run the app
 
