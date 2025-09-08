@@ -36,26 +36,24 @@ Supports uploading, recording, or selecting reference voices and generating natu
   - **requests**: API calls (if extending functionality)
   - Virtual Environment (`venv/`) for dependency isolation
 
-
 ---
 
 ## 📂 Project Structure
   voice_clone_app/
   │
   ├── outputs/                  # Generated outputs (auto-created)
-  │   ├── _meta/                # Metadata of generations
   │   └── xtts_*.wav            # Generated files
   │
   ├── voices/                   # Reference voices (auto-created)
-  │   ├── myvoice.wav
   │   ├── ref_*.wav             # Uploaded/recorded samples
   │
   ├── app.py                    # Main Streamlit application
-  ├── run_app.py                 # Launcher (cross-platform, auto-opens browser)
-  ├── test.py                    # Experimental/testing script
-  ├── requirements.txt           # Python dependencies
-  ├── LICENSE                    # Open-source license
-  ├── .gitignore                 # Ignored files/folders
+  ├── run_app.py                # Launcher (cross-platform, auto-opens browser)
+  ├── test.py                   # Experimental/testing script
+  ├── requirements.txt          # Python dependencies
+  ├── LICENSE                   # Open-source license
+  ├── .gitignore                # Ignored files/folders
+  └── README.md                 # Project documentation
 
 
 ---
@@ -86,6 +84,8 @@ pip install -r requirements.txt
   - macOS: `brew install ffmpeg`
   - Linux: `sudo apt-get install ffmpeg`
 
+---
+
 ## ▶️ Run the app
 
 ```bash
@@ -111,4 +111,4 @@ Ebrahim Abdul Raoof
 ---
 
 ## 📜 License
-This project is licensed under the MIT License. See [LICENSE](https://github.com/EbrahimAR/AIExamSystem/blob/main/LICENSE) for details.
+This project is licensed under the MIT License. See [LICENSE](https://github.com/EbrahimAR/AI-Voice-Cloner-XTTS-v2/blob/main/LICENSE) for details.
