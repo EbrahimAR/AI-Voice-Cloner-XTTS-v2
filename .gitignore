@@ -1,18 +1,23 @@
-# Python cache
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 
 # Virtual environments
-.venv/
-env/
 venv/
+env/
+.env
 
-# OS files
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
 Thumbs.db
 
-# Streamlit cache
+# Streamlit
 .streamlit/
-
