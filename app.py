@@ -1,6 +1,21 @@
-# AI Voice Cloner (XTTS v2) - Streamlit app
-# NOTE: requires ffmpeg installed on system for MP3 export (not a pip package).
+#!/usr/bin/env python3
+"""
+AI Voice Cloner using Coqui XTTS v2
 
+A Streamlit web application for voice cloning using the XTTS v2 model.
+Users can upload reference audio or record their own voice to clone,
+then generate speech in the cloned voice from text input.
+
+Requirements:
+- Python 3.8+
+- FFmpeg (for MP3 export)
+- CUDA-compatible GPU (optional, for faster inference)
+
+Author: AI Voice Cloner Project
+License: MIT
+"""
+
+# Standard library imports
 import os
 import io
 import time
@@ -9,20 +24,27 @@ import uuid
 import shutil
 import threading
 import base64
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+
+# Third-party imports
 import librosa
-import warnings
-warnings.filterwarnings("ignore", message=".*Torchaudio.*")
 import numpy as np
 import soundfile as sf
 import streamlit as st
 import streamlit.components.v1 as components
 from pydub import AudioSegment
-from datetime import datetime
 from TTS.api import TTS
 
-# -----------------------------
-# App config
-# -----------------------------
+# Suppress torchaudio warnings
+import warnings
+warnings.filterwarnings("ignore", message=".*Torchaudio.*")
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+# Streamlit page configuration
 st.set_page_config(
     page_title="AI Voice Cloner (XTTS v2)",
     page_icon="🗣️",
@@ -30,323 +52,551 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# -----------------------------
-# Session-state defaults (persist across reruns)
-# -----------------------------
-# We use session_state to store actual data (file paths, base64 strings)
-# so we never attempt to iterate over Streamlit DeltaGenerator objects.
-if "speaker_path" not in st.session_state:
-    st.session_state.speaker_path = None
-if "ref_display_name" not in st.session_state:
-    st.session_state.ref_display_name = None
-if "recorded_b64" not in st.session_state:
-    st.session_state.recorded_b64 = None
-
-# -----------------------------
-# Custom Dark Theme Styling
-# -----------------------------
-st.markdown("""
-<style>
-/* General page tweaks */
-.stApp {
-    background-color: #0E1117;
-    color: #FFFFFF;
-    font-family: 'Inter', sans-serif;
-}
-
-/* Card-like look for containers */
-.block-container {
-    padding: 2rem 2rem;
-    border-radius: 12px;
-}
-
-/* Text areas and inputs */
-textarea, input, .stTextInput>div>div>input {
-    background-color: #161B22 !important;
-    color: #FFFFFF !important;
-    border-radius: 8px !important;
-    border: 1px solid #2E343F !important;
-}
-
-/* Buttons */
-.stButton>button {
-    background: linear-gradient(135deg, #1f1c2c, #928DAB) !important;
-    color: white !important;
-    border-radius: 8px !important;
-    border: none !important;
-    font-weight: 600 !important;
-    padding: 0.6rem 1.2rem !important;
-    transition: all 0.2s ease-in-out;
-}
-.stButton>button:hover {
-    background: linear-gradient(135deg, #485563, #29323c) !important;
-    transform: scale(1.03);
-}
-
-/* Radio buttons and selects */
-.stRadio>div, .stSelectbox>div>div {
-    background-color: #161B22 !important;
-    border-radius: 6px !important;
-    padding: 0.4rem !important;
-}
-.stRadio label, .stSelectbox label {
-    color: #FFFFFF !important;
-}
-
-/* Fix dropdown text + background visibility (Base Web Select + its portal menu) */
-.stApp [data-baseweb="select"] > div {
-    color: #FFFFFF !important;
-    background-color: #161B22 !important;
-    border: 1px solid #2E343F !important;
-}
-.stApp [data-baseweb="select"] input {
-    color: #FFFFFF !important;
-}
-.stApp [data-baseweb="select"] svg {
-    fill: #FFFFFF !important;
-}
-/* The options menu is rendered in a portal with data-baseweb="menu" */
-.stApp div[data-baseweb="menu"] {
-    background-color: #161B22 !important;
-    color: #FFFFFF !important;
-    border: 1px solid #2E343F !important;
-}
-.stApp li[data-baseweb="menu-item"] {
-    background-color: #161B22 !important;
-    color: #FFFFFF !important;
-}
-.stApp li[data-baseweb="menu-item"]:hover {
-    background-color: #242B36 !important;
-}
-.stApp li[data-baseweb="menu-item"][aria-selected="true"] {
-    background-color: #2A313D !important;
-}
-
-/* Download buttons */
-.stDownloadButton>button {
-    background: linear-gradient(135deg, #1f1c2c, #928DAB) !important;
-    color: white !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-}
-.stDownloadButton>button:hover {
-    background: linear-gradient(135deg, #485563, #29323c) !important;
-    transform: scale(1.02);
-}
-
-/* Audio player styling */
-audio {
-    border-radius: 10px;
-    outline: none;
-    margin-top: 0.5rem;
-}
-
-/* Divider styling */
-hr {
-    border: none;
-    border-top: 1px solid #2E343F;
-    margin: 2rem 0;
-}
-
-/* Card styling */
-.card {
-    padding: 1rem;
-    margin: 1rem 0;
-    border-radius: 12px;
-    background: #1E222A;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
-}
-
-/* Remove empty space at top */
-.stApp > header {
-    display: none;
-}
-
-/* Fix for empty bar issue */
-.appview-container .main .block-container {
-    padding-top: 2rem;
-}
-
-/* Fix dropdown selected text being cut off */
-div[data-baseweb="select"] > div {
-    height: auto !important;
-    min-height: 38px !important;
-    padding-top: 6px !important;
-    padding-bottom: 6px !important;
-    white-space: normal !important;
-    overflow: visible !important;
-}
-
-/* Make selected value fully visible */
-div[data-baseweb="select"] span {
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: unset !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# -----------------------------
-# Constants & Dirs
-# -----------------------------
+# Model and device configuration
 MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
-DEVICE = "cpu"  # change to "cuda" if you set up GPU and compatible TTS/torch
+DEVICE = "cpu"  # Change to "cuda" if you have a compatible GPU setup
 
-VOICES_DIR = "voices"
-OUTPUTS_DIR = "outputs"
-META_DIR = os.path.join(OUTPUTS_DIR, "_meta")
-for d in (VOICES_DIR, OUTPUTS_DIR, META_DIR):
-    os.makedirs(d, exist_ok=True)
+# Directory configuration
+VOICES_DIR = "voices"           # Directory for reference voice files
+OUTPUTS_DIR = "outputs"         # Directory for generated audio files
+META_DIR = os.path.join(OUTPUTS_DIR, "_meta")  # Metadata storage
 
-RECENTS_LIMIT = 8  # how many generations to show in gallery
+# Application settings
+RECENTS_LIMIT = 8  # Number of recent generations to show in gallery
 
-# -----------------------------
-# Helpers (TTS & audio)
-# -----------------------------
+# Create directories if they don't exist
+for directory in (VOICES_DIR, OUTPUTS_DIR, META_DIR):
+    os.makedirs(directory, exist_ok=True)
+
+# =============================================================================
+# SESSION STATE INITIALIZATION
+# =============================================================================
+
+def initialize_session_state():
+    """Initialize Streamlit session state variables with default values."""
+    default_states = {
+        "speaker_path": None,
+        "ref_display_name": None,
+        "recorded_b64": None,
+        "recording_processed": False,
+        "pending_delete": None,
+        "active_voice": None,  # Currently active voice filename
+        "batch_delete": [],
+        "confirm_batch_delete": False
+    }
+    
+    for key, default_value in default_states.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
+
+# Initialize session state
+initialize_session_state()
+
+# =============================================================================
+# STYLING
+# =============================================================================
+
+def apply_custom_styling():
+    """Apply custom CSS styling for the Streamlit app."""
+    st.markdown("""
+    <style>
+    /* General page styling */
+    .stApp {
+        background-color: #0E1117;
+        color: #FFFFFF;
+        font-family: 'Inter', sans-serif;
+    }
+
+    /* Container styling */
+    .block-container {
+        padding: 2rem 2rem;
+        border-radius: 12px;
+    }
+
+    /* Input field styling */
+    textarea, input, .stTextInput>div>div>input {
+        background-color: #161B22 !important;
+        color: #FFFFFF !important;
+        border-radius: 8px !important;
+        border: 1px solid #2E343F !important;
+    }
+
+    /* Button styling */
+    .stButton>button {
+        background: linear-gradient(135deg, #1f1c2c, #928DAB) !important;
+        color: white !important;
+        border-radius: 8px !important;
+        border: none !important;
+        font-weight: 600 !important;
+        padding: 0.6rem 1.2rem !important;
+        transition: all 0.2s ease-in-out;
+    }
+    .stButton>button:hover {
+        background: linear-gradient(135deg, #485563, #29323c) !important;
+        transform: scale(1.03);
+    }
+
+    /* Radio buttons and select boxes */
+    .stRadio>div, .stSelectbox>div>div {
+        background-color: #161B22 !important;
+        border-radius: 6px !important;
+        padding: 0.4rem !important;
+    }
+    .stRadio label, .stSelectbox label {
+        color: #FFFFFF !important;
+    }
+
+    /* Dropdown styling */
+    .stApp [data-baseweb="select"] > div {
+        color: #FFFFFF !important;
+        background-color: #161B22 !important;
+        border: 1px solid #2E343F !important;
+    }
+    .stApp [data-baseweb="select"] input {
+        color: #FFFFFF !important;
+    }
+    .stApp [data-baseweb="select"] svg {
+        fill: #FFFFFF !important;
+    }
+    .stApp div[data-baseweb="menu"] {
+        background-color: #161B22 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #2E343F !important;
+    }
+    .stApp li[data-baseweb="menu-item"] {
+        background-color: #161B22 !important;
+        color: #FFFFFF !important;
+    }
+    .stApp li[data-baseweb="menu-item"]:hover {
+        background-color: #242B36 !important;
+    }
+    .stApp li[data-baseweb="menu-item"][aria-selected="true"] {
+        background-color: #2A313D !important;
+    }
+
+    /* Download button styling */
+    .stDownloadButton>button {
+        background: linear-gradient(135deg, #1f1c2c, #928DAB) !important;
+        color: white !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+    .stDownloadButton>button:hover {
+        background: linear-gradient(135deg, #485563, #29323c) !important;
+        transform: scale(1.02);
+    }
+
+    /* Audio player styling */
+    audio {
+        border-radius: 10px;
+        outline: none;
+        margin-top: 0.5rem;
+    }
+
+    /* Divider styling */
+    hr {
+        border: none;
+        border-top: 1px solid #2E343F;
+        margin: 2rem 0;
+    }
+
+    /* Card styling */
+    .card {
+        padding: 1rem;
+        margin: 1rem 0;
+        border-radius: 12px;
+        background: #1E222A;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    }
+
+    /* Remove empty space at top */
+    .stApp > header {
+        display: none;
+    }
+
+    /* Layout improvements */
+    .appview-container .main .block-container {
+        padding-top: 2rem;
+    }
+
+    /* Dropdown text visibility fixes */
+    div[data-baseweb="select"] > div {
+        height: auto !important;
+        min-height: 38px !important;
+        padding-top: 6px !important;
+        padding-bottom: 6px !important;
+        white-space: normal !important;
+        overflow: visible !important;
+    }
+    div[data-baseweb="select"] span {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+    }
+
+    /* Active voice badge */
+    .active-badge {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: linear-gradient(90deg, #2ee082, #1fb5a6);
+        color: #042023;
+        font-weight: 700;
+        margin-left: 6px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# Apply styling
+apply_custom_styling()
+
+# =============================================================================
+# CORE TTS AND AUDIO PROCESSING FUNCTIONS
+# =============================================================================
+
 @st.cache_resource(show_spinner=True)
-def load_tts_model():
-    """Load XTTS model once and cache. No Streamlit calls inside."""
+def load_tts_model() -> TTS:
+    """
+    Load and cache the XTTS v2 model.
+    
+    Returns:
+        TTS: Loaded TTS model instance
+        
+    Note:
+        This function is cached to avoid reloading the model on every run.
+        The model is loaded once and reused across sessions.
+    """
     return TTS(MODEL_NAME, progress_bar=True).to(DEVICE)
 
-def _trim_silence(y, sr, top_db=28, min_len_sec=0.1):
-    """Trim long silent regions from audio signal."""
-    intervals = librosa.effects.split(y, top_db=top_db)
+
+def trim_silence(audio_data: np.ndarray, sample_rate: int, 
+                top_db: int = 28, min_length_sec: float = 0.1) -> np.ndarray:
+    """
+    Trim long silent regions from audio signal.
+    
+    Args:
+        audio_data: Audio signal as numpy array
+        sample_rate: Sample rate of the audio
+        top_db: Threshold for silence detection
+        min_length_sec: Minimum length of audio segments to keep
+        
+    Returns:
+        np.ndarray: Trimmed audio signal
+    """
+    intervals = librosa.effects.split(audio_data, top_db=top_db)
     if len(intervals) == 0:
-        return y
+        return audio_data
+        
     chunks = []
     for start, end in intervals:
-        if (end - start) / sr >= min_len_sec:
-            chunks.append(y[start:end])
+        if (end - start) / sample_rate >= min_length_sec:
+            chunks.append(audio_data[start:end])
+    
     if not chunks:
-        return y
+        return audio_data
+        
     return np.concatenate(chunks)
 
-def ensure_wav_mono16(file_bytes: bytes, *_ignore, do_trim=True, trim_db=28) -> str:
-    """
-    Convert input bytes to WAV mono 16k PCM and save to VOICES_DIR.
-    Returns the saved path.
-    """
-    y, sr = librosa.load(io.BytesIO(file_bytes), sr=None, mono=True)
-    if do_trim:
-        y = _trim_silence(y, sr, top_db=trim_db)
-    if sr != 16000:
-        y = librosa.resample(y, orig_sr=sr, target_sr=16000)
-        sr = 16000
-    peak = np.max(np.abs(y)) if y.size else 1.0
-    if peak > 0:
-        y = 0.98 * y / peak
-    out_path = os.path.join(VOICES_DIR, f"ref_{int(time.time())}.wav")
-    sf.write(out_path, y, sr, subtype="PCM_16")
-    return out_path
 
-def synthesize(tts, text: str, speaker_wav_path: str, language: str = "en",
-               style: str = "neutral", speed_adv: float | None = None,
-               emotion_adv: str | None = None) -> str:
-    """Run XTTS to synthesize to a new WAV file; returns path to WAV."""
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_wav = os.path.join(OUTPUTS_DIR, f"xtts_{ts}.wav")
+def preprocess_audio_file(file_bytes: bytes, do_trim: bool = True, 
+                         trim_db: int = 28) -> str:
+    """
+    Convert input audio bytes to WAV mono 16kHz PCM format for XTTS.
+    
+    Args:
+        file_bytes: Raw audio file bytes
+        do_trim: Whether to trim silence
+        trim_db: Threshold for silence trimming
+        
+    Returns:
+        str: Path to the processed WAV file
+        
+    Raises:
+        Exception: If audio processing fails
+    """
+    try:
+        # Load audio with librosa (handles most formats)
+        audio_data, sample_rate = librosa.load(
+            io.BytesIO(file_bytes), sr=None, mono=True
+        )
+        
+        # Trim silence if requested
+        if do_trim:
+            audio_data = trim_silence(audio_data, sample_rate, top_db=trim_db)
+        
+        # Resample to 16kHz if needed
+        if sample_rate != 16000:
+            audio_data = librosa.resample(
+                audio_data, orig_sr=sample_rate, target_sr=16000
+            )
+            sample_rate = 16000
+        
+        # Normalize audio to prevent clipping
+        peak = np.max(np.abs(audio_data)) if audio_data.size > 0 else 1.0
+        if peak > 0:
+            audio_data = 0.98 * audio_data / peak
+        
+        # Save to voices directory with timestamp
+        output_path = os.path.join(VOICES_DIR, f"ref_{int(time.time())}.wav")
+        sf.write(output_path, audio_data, sample_rate, subtype="PCM_16")
+        
+        return output_path
+        
+    except Exception as e:
+        raise Exception(f"Audio preprocessing failed: {str(e)}")
 
-    style_map = {
+
+def synthesize_speech(tts_model: TTS, text: str, speaker_wav_path: str, 
+                     language: str = "en", style: str = "neutral",
+                     speed_override: Optional[float] = None,
+                     emotion_override: Optional[str] = None) -> str:
+    """
+    Generate speech using XTTS v2 model.
+    
+    Args:
+        tts_model: Loaded TTS model instance
+        text: Text to synthesize
+        speaker_wav_path: Path to reference speaker audio
+        language: Target language code
+        style: Voice style preset
+        speed_override: Custom speed value (overrides style preset)
+        emotion_override: Custom emotion value (overrides style preset)
+        
+    Returns:
+        str: Path to generated WAV file
+    """
+    # Generate unique filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = os.path.join(OUTPUTS_DIR, f"xtts_{timestamp}.wav")
+    
+    # Style presets
+    style_presets = {
         "neutral": {"speed": 1.0, "emotion": None},
         "fast": {"speed": 1.1, "emotion": None},
         "expressive": {"speed": 1.0, "emotion": "happy"},
     }
-    params = style_map.get(style, {"speed": 1.0, "emotion": None})
-
-    if speed_adv is not None:
-        params["speed"] = float(speed_adv)
-    if emotion_adv is not None and emotion_adv != "None":
-        params["emotion"] = emotion_adv
+    
+    # Get style parameters or use defaults
+    params = style_presets.get(style, {"speed": 1.0, "emotion": None})
+    
+    # Apply overrides if provided
+    if speed_override is not None:
+        params["speed"] = float(speed_override)
+    if emotion_override is not None and emotion_override != "None":
+        params["emotion"] = emotion_override
     if params.get("emotion") == "None":
         params["emotion"] = None
-
-    tts.tts_to_file(
+    
+    # Generate speech
+    tts_model.tts_to_file(
         text=text,
-        file_path=out_wav,
+        file_path=output_path,
         speaker_wav=speaker_wav_path,
         language=language,
         speed=params["speed"],
         emotion=params["emotion"],
     )
-    return out_wav
+    
+    return output_path
 
-def normalize_loudness(wav_path: str) -> str:
-    """Normalize loudness and return path to normalized WAV."""
-    snd = AudioSegment.from_wav(wav_path)
-    change_needed = -1.0 - snd.max_dBFS if hasattr(snd, "max_dBFS") and snd.max_dBFS is not None else 0
-    if np.isfinite(change_needed) and abs(change_needed) > 0.1:
-        snd = snd.apply_gain(change_needed)
-    norm_path = wav_path.replace(".wav", "_norm.wav")
-    snd.export(norm_path, format="wav")
-    return norm_path
 
-def convert_to_mp3(wav_path: str) -> str:
-    """Convert WAV to MP3 using ffmpeg via pydub."""
+def normalize_audio_loudness(wav_path: str) -> str:
+    """
+    Normalize audio loudness to a consistent level.
+    
+    Args:
+        wav_path: Path to input WAV file
+        
+    Returns:
+        str: Path to normalized WAV file
+    """
     try:
-        sound = AudioSegment.from_wav(wav_path)
+        audio_segment = AudioSegment.from_wav(wav_path)
+        
+        # Calculate gain needed to reach target loudness
+        target_dBFS = -1.0
+        if hasattr(audio_segment, "max_dBFS") and audio_segment.max_dBFS is not None:
+            gain_needed = target_dBFS - audio_segment.max_dBFS
+            if np.isfinite(gain_needed) and abs(gain_needed) > 0.1:
+                audio_segment = audio_segment.apply_gain(gain_needed)
+        
+        # Export normalized audio
+        normalized_path = wav_path.replace(".wav", "_norm.wav")
+        audio_segment.export(normalized_path, format="wav")
+        
+        return normalized_path
+        
     except Exception as e:
-        raise RuntimeError(f"Could not open WAV for MP3 conversion: {e}")
-    mp3_path = wav_path.replace(".wav", ".mp3")
+        # Return original path if normalization fails
+        print(f"Warning: Loudness normalization failed: {e}")
+        return wav_path
+
+
+def convert_wav_to_mp3(wav_path: str) -> str:
+    """
+    Convert WAV file to MP3 format using FFmpeg via pydub.
+    
+    Args:
+        wav_path: Path to input WAV file
+        
+    Returns:
+        str: Path to output MP3 file
+        
+    Raises:
+        RuntimeError: If conversion fails or FFmpeg is not available
+    """
     try:
-        sound.export(mp3_path, format="mp3", bitrate="192k")
+        audio_segment = AudioSegment.from_wav(wav_path)
+        mp3_path = wav_path.replace(".wav", ".mp3")
+        audio_segment.export(mp3_path, format="mp3", bitrate="192k")
+        return mp3_path
+        
     except FileNotFoundError:
         raise RuntimeError(
-            "MP3 conversion requires ffmpeg. Install it and ensure it's on PATH.\n"
-            "• Windows (choco): choco install ffmpeg\n"
-            "• macOS (brew): brew install ffmpeg\n"
-            "• Linux (apt): sudo apt-get install ffmpeg"
+            "MP3 conversion requires FFmpeg to be installed and available in PATH.\n"
+            "Installation instructions:\n"
+            "• Windows (Chocolatey): choco install ffmpeg\n"
+            "• macOS (Homebrew): brew install ffmpeg\n"
+            "• Linux (APT): sudo apt-get install ffmpeg"
         )
-    return mp3_path
+    except Exception as e:
+        raise RuntimeError(f"MP3 conversion failed: {str(e)}")
 
-def get_voice_gallery():
-    return sorted([f for f in os.listdir(VOICES_DIR) if f.lower().endswith(".wav")])
+# =============================================================================
+# VOICE GALLERY MANAGEMENT
+# =============================================================================
 
-def save_generation_meta(out_wav: str, text: str, language: str, style: str,
-                         ref_name: str | None, extras: dict | None = None):
-    """Save generation metadata JSON for the recent gallery."""
-    meta = {
+def get_voice_gallery() -> List[str]:
+    """
+    Get list of available voice files from the voices directory.
+    
+    Returns:
+        List[str]: Sorted list of WAV filenames
+    """
+    try:
+        files = os.listdir(VOICES_DIR)
+        wav_files = [f for f in files if f.lower().endswith(".wav")]
+        return sorted(wav_files)
+    except FileNotFoundError:
+        return []
+
+
+def delete_voice_file(filename: str) -> bool:
+    """
+    Safely delete a voice file and update session state if needed.
+    
+    Args:
+        filename: Name of the file to delete
+        
+    Returns:
+        bool: True if deletion was successful, False otherwise
+    """
+    try:
+        file_path = os.path.join(VOICES_DIR, filename)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        
+        # Clear active voice if the deleted file was active
+        if st.session_state.get("active_voice") == filename:
+            st.session_state.active_voice = None
+            st.session_state.speaker_path = None
+            st.session_state.ref_display_name = None
+            
+        return True
+        
+    except Exception as e:
+        st.error(f"Failed to delete {filename}: {str(e)}")
+        return False
+
+# =============================================================================
+# GENERATION METADATA MANAGEMENT
+# =============================================================================
+
+def save_generation_metadata(output_wav_path: str, text: str, language: str, 
+                           style: str, reference_name: Optional[str],
+                           extras: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Save metadata for a generated audio file.
+    
+    Args:
+        output_wav_path: Path to generated WAV file
+        text: Input text used for generation
+        language: Language used
+        style: Style used
+        reference_name: Name of reference voice file
+        extras: Additional metadata
+        
+    Returns:
+        str: Path to saved metadata file
+    """
+    metadata = {
         "id": str(uuid.uuid4()),
         "created": datetime.now().isoformat(),
-        "wav": os.path.basename(out_wav),
-        "text": text[:5000],
+        "wav": os.path.basename(output_wav_path),
+        "text": text[:5000],  # Limit text length
         "language": language,
         "style": style,
-        "reference": ref_name,
+        "reference": reference_name,
         "extras": extras or {},
     }
-    meta_path = os.path.join(META_DIR, meta["id"] + ".json")
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
-    return meta_path
+    
+    metadata_path = os.path.join(META_DIR, f"{metadata['id']}.json")
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    
+    return metadata_path
 
-def load_recent_meta(n=RECENTS_LIMIT):
-    files = [os.path.join(META_DIR, f) for f in os.listdir(META_DIR) if f.endswith(".json")]
-    files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
-    metas = []
-    for p in files[:n]:
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                metas.append(json.load(f))
-        except Exception:
-            continue
-    return metas
 
-# -----------------------------
-# Browser-based audio recording (returns base64 to Python)
-# - This component uses window.parent.postMessage to send a dataURL back.
-# - components.html will return the posted value (a string) when available.
-# - We still guard the value: components.html may return a DeltaGenerator or None
-#   on initial renders; we therefore only accept/process strings.
-# -----------------------------
-def audio_recorder_component() -> str | None:
-    """Inline HTML5 recorder with pulsing mic animation while recording.
-
-    Returns:
-        dataURL string (e.g. "data:audio/webm;base64,....") when recording is complete,
-        otherwise returns None / DeltaGenerator (which we ignore).
+def load_recent_metadata(limit: int = RECENTS_LIMIT) -> List[Dict[str, Any]]:
     """
-    # Note: components.html returns the value set via Streamlit.setComponentValue (or postMessage)
-    # when the component posts it. On first renders it may return a DeltaGenerator - do not rely on it.
+    Load recent generation metadata files.
+    
+    Args:
+        limit: Maximum number of metadata entries to return
+        
+    Returns:
+        List[Dict[str, Any]]: List of metadata dictionaries, sorted by creation time
+    """
+    try:
+        metadata_files = [
+            os.path.join(META_DIR, f) 
+            for f in os.listdir(META_DIR) 
+            if f.endswith(".json")
+        ]
+        
+        # Sort by modification time (most recent first)
+        metadata_files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        
+        metadata_list = []
+        for file_path in metadata_files[:limit]:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    metadata_list.append(json.load(f))
+            except Exception:
+                # Skip corrupted metadata files
+                continue
+                
+        return metadata_list
+        
+    except FileNotFoundError:
+        return []
+
+# =============================================================================
+# AUDIO RECORDING COMPONENT
+# =============================================================================
+
+def create_audio_recorder_component() -> Optional[str]:
+    """
+    Create a browser-based audio recording component.
+    
+    Returns:
+        Optional[str]: Base64-encoded audio data URL when recording is complete,
+                      None otherwise
+                      
+    Note:
+        This component uses HTML5 MediaRecorder API to capture audio in the browser
+        and returns it as a base64-encoded data URL.
+    """
     return components.html(
         """
         <style>
@@ -378,7 +628,7 @@ def audio_recorder_component() -> str | None:
             font-size: 14px;
             color: #FFFFFF;
         }
-        /* Mic pulse animation */
+        /* Pulsing animation for recording indicator */
         .pulse {
             display: inline-block;
             font-size: 18px;
@@ -399,53 +649,79 @@ def audio_recorder_component() -> str | None:
         </div>
 
         <script>
+        // Get DOM elements
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const statusDiv = document.getElementById('recording-status');
         const audioEl = document.getElementById('audio-playback');
-        let mediaRecorder; let chunks = [];
+        
+        let mediaRecorder;
+        let audioChunks = [];
 
-        function setHeight(){ if (window.Streamlit) { window.Streamlit.setFrameHeight(300); } }
-        setHeight();
+        // Set iframe height for Streamlit
+        function setFrameHeight() {
+            if (window.Streamlit) {
+                window.Streamlit.setFrameHeight(300);
+            }
+        }
+        setFrameHeight();
 
+        // Start recording
         startBtn.addEventListener('click', async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream);
-                chunks = [];
-                mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+
                 mediaRecorder.onstop = async () => {
-                    const blob = new Blob(chunks, { type: 'audio/webm' });
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                     const reader = new FileReader();
+                    
                     reader.onloadend = () => {
-                        const base64data = reader.result; // data:audio/webm;base64,...
-                        audioEl.src = base64data;
+                        const base64AudioData = reader.result;
+                        audioEl.src = base64AudioData;
                         audioEl.style.display = 'block';
                         statusDiv.innerHTML = '<span style="color:#7ee787">✅ Recording captured</span>';
-                        // Post the value back to Streamlit component (components.html captures this)
+                        
+                        // Send data back to Streamlit
                         if (window.parent) {
                             window.parent.postMessage({
                                 isStreamlitMessage: true,
                                 type: "streamlit:setComponentValue",
-                                value: base64data
+                                value: base64AudioData
                             }, "*");
                         }
                     };
-                    reader.readAsDataURL(blob);
+                    reader.readAsDataURL(audioBlob);
                 };
+
                 mediaRecorder.start();
-                startBtn.disabled = true; stopBtn.disabled = false;
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
                 statusDiv.innerHTML = '<span class="pulse">🎤 Recording...</span>';
-            } catch (err) {
-                statusDiv.innerHTML = '<span style="color:#ff6b6b">Error: ' + err.message + '</span>';
+                
+            } catch (error) {
+                statusDiv.innerHTML = '<span style="color:#ff6b6b">Error: ' + error.message + '</span>';
+                console.error('Recording error:', error);
             }
         });
 
+        // Stop recording
         stopBtn.addEventListener('click', () => {
             if (mediaRecorder && mediaRecorder.state === 'recording') {
                 mediaRecorder.stop();
-                mediaRecorder.stream.getTracks().forEach(t => t.stop());
-                startBtn.disabled = false; stopBtn.disabled = true;
+                
+                // Stop all tracks to release the microphone
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
                 statusDiv.innerText = 'Processing...';
             }
         });
@@ -454,378 +730,764 @@ def audio_recorder_component() -> str | None:
         height=320,
     )
 
-# -----------------------------
-# Save recorded/uploaded audio safely
-# - save_audio_from_base64 expects a dataURL string "data:...;base64,AAAA.."
-# - It returns saved WAV path or None on error
-# -----------------------------
-def save_audio_from_base64(base64_audio: str) -> str | None:
-    """Save base64 audio (data URL) to WAV mono 16k for XTTS. Returns filepath or None."""
+
+def process_recorded_audio(base64_audio_data: str) -> Optional[str]:
+    """
+    Process base64-encoded audio data and save as WAV file.
+    
+    Args:
+        base64_audio_data: Base64-encoded audio data URL
+        
+    Returns:
+        Optional[str]: Path to saved WAV file, None if processing failed
+    """
     try:
-        if not base64_audio or not isinstance(base64_audio, str):
-            raise ValueError("No valid base64 data URL provided.")
+        if not base64_audio_data or not isinstance(base64_audio_data, str):
+            raise ValueError("Invalid base64 audio data provided")
 
-        # Extract payload, data URLs have form: data:<mime>;base64,<payload>
-        if "," in base64_audio:
-            header, payload = base64_audio.split(",", 1)
+        # Parse data URL: data:<mime>;base64,<payload>
+        if "," in base64_audio_data:
+            header, payload = base64_audio_data.split(",", 1)
         else:
-            # if not a dataURL, assume payload only
-            payload = base64_audio
+            # Assume payload only if no comma found
+            payload = base64_audio_data
 
-        audio_bytes = io.BytesIO(base64.b64decode(payload))
+        # Decode base64 data
+        decoded_audio = base64.b64decode(payload)
 
-        # Load/trim/resample
-        y, sr = librosa.load(audio_bytes, sr=None, mono=True)
-        y = _trim_silence(y, sr, top_db=28)
-        if sr != 16000:
-            y = librosa.resample(y, orig_sr=sr, target_sr=16000)
-            sr = 16000
-        peak = np.max(np.abs(y)) if y.size else 1.0
+        # First attempt: try librosa directly
+        try:
+            audio_buffer = io.BytesIO(decoded_audio)
+            audio_data, sample_rate = librosa.load(audio_buffer, sr=None, mono=True)
+            
+        except Exception:
+            # Fallback: use pydub to handle container formats like webm
+            try:
+                audio_segment = AudioSegment.from_file(io.BytesIO(decoded_audio))
+                wav_buffer = io.BytesIO()
+                audio_segment.export(wav_buffer, format="wav")
+                wav_buffer.seek(0)
+                audio_data, sample_rate = librosa.load(wav_buffer, sr=None, mono=True)
+                
+            except Exception as e:
+                raise RuntimeError(f"Could not decode audio data: {str(e)}")
+
+        # Process audio: trim silence, resample, normalize
+        audio_data = trim_silence(audio_data, sample_rate, top_db=28)
+        
+        if sample_rate != 16000:
+            audio_data = librosa.resample(
+                audio_data, orig_sr=sample_rate, target_sr=16000
+            )
+            sample_rate = 16000
+
+        # Normalize to prevent clipping
+        peak = np.max(np.abs(audio_data)) if audio_data.size > 0 else 1.0
         if peak > 0:
-            y = 0.98 * y / peak
+            audio_data = 0.98 * audio_data / peak
 
-        final_path = os.path.join(VOICES_DIR, f"recorded_{int(time.time())}.wav")
-        sf.write(final_path, y, sr, subtype="PCM_16")
-        return final_path
+        # Save processed audio
+        timestamp = int(time.time())
+        output_path = os.path.join(VOICES_DIR, f"recorded_{timestamp}.wav")
+        sf.write(output_path, audio_data, sample_rate, subtype="PCM_16")
+        
+        return output_path
+        
     except Exception as e:
-        # Provide actionable error for the user (don't raise unhandled)
-        st.error(f"Error processing audio: {e}")
+        st.error(f"Error processing recorded audio: {str(e)}")
         return None
 
-# -----------------------------
-# Sidebar (Settings)
-# -----------------------------
-with st.sidebar:
-    st.subheader("⚙️ Settings")
-    language = st.selectbox(
-        "Language",
-        ["en", "es", "fr", "de", "it", "pt", "pl", "tr", "ru", "nl", "cs", "ar", "zh-cn", "ja", "ko", "hi"],
-        index=0,
-        help="Select the language for voice synthesis"
-    )
+# =============================================================================
+# SIDEBAR CONFIGURATION
+# =============================================================================
 
-    style = st.radio("Voice style", ["neutral", "fast", "expressive"], index=0)
-    advanced = st.checkbox("Advanced controls", value=False)
-    speed_adv = None
-    emotion_adv = None
-    if advanced:
-        speed_adv = st.slider("Speed (0.8–1.5)", min_value=0.8, max_value=1.5, value=1.0, step=0.01)
-        emotion_adv = st.selectbox("Emotion (XTTS v2)", ["None", "happy", "sad", "angry", "surprised", "fearful"], index=0)
+def create_sidebar():
+    """Create and populate the application sidebar with settings and controls."""
+    with st.sidebar:
+        st.subheader("⚙️ Settings")
+        
+        # Language selection
+        language = st.selectbox(
+            "Language",
+            options=[
+                "en", "es", "fr", "de", "it", "pt", "pl", "tr", 
+                "ru", "nl", "cs", "ar", "zh-cn", "ja", "ko", "hi"
+            ],
+            index=0,
+            help="Select the target language for voice synthesis"
+        )
 
-    st.markdown("---")
-    st.markdown("**Natural Voice Settings**")
-    voice_stability = st.slider("Voice stability", 0.0, 1.0, 0.5, 0.1,
-                               help="Higher values make voice more stable but less expressive")
-    voice_similarity = st.slider("Voice similarity", 0.0, 1.0, 0.75, 0.1,
-                                help="Higher values make output more similar to reference voice")
-
-    normalize_out = st.checkbox("Normalize output loudness", value=True)
-    st.markdown(f"**Device:** `{DEVICE}`")
-
-    if st.button("🚀 Load / Warm up model", use_container_width=True):
-        t0 = time.time()
-        with st.spinner("Loading XTTS model..."):
-            _ = load_tts_model()
-        st.success(f"Model ready on {DEVICE} in {time.time() - t0:.1f}s")
-
-# -----------------------------
-# Header & Text
-# -----------------------------
-st.title("🗣️ AI Voice Cloner")
-st.caption("Coqui XTTS v2 • For best results, use 20–30 seconds of clean reference speech.")
-
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.markdown("### 📝 Enter Text")
-text = st.text_area(
-    "Text to speak",
-    "Hello! This is my cloned voice running from a Streamlit web app. The voice should sound natural and expressive.",
-    height=140,
-    label_visibility="collapsed",
-    help="Use punctuation and natural phrasing for better results. Avoid very long sentences."
-)
-st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown("---")
-
-# -----------------------------
-# Reference Voice Selection
-# -----------------------------
-st.markdown("### 🎵 Choose Reference Voice")
-
-voice_option = st.radio(
-    "Select input method",
-    ["Upload new voice", "Use voice from gallery", "Record live"],
-    horizontal=True
-)
-
-speaker_path = st.session_state.speaker_path
-ref_display_name = st.session_state.ref_display_name
-
-# --- Upload new voice
-if voice_option == "Upload new voice":
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    uploaded = st.file_uploader(
-        "Upload reference voice (20–30s clean speech)",
-        type=["wav", "mp3", "m4a", "flac", "ogg"]
-    )
-    trim_ref = st.checkbox("Trim long silences from reference", value=True)
-    trim_db = st.slider("Trim sensitivity (dB)", 20, 40, 28)
-    if uploaded:
-        file_bytes = uploaded.read()
-        with st.spinner("Preprocessing uploaded voice..."):
-            try:
-                speaker_path = ensure_wav_mono16(file_bytes, uploaded.name, do_trim=trim_ref, trim_db=trim_db)
-                ref_display_name = os.path.basename(speaker_path)
-                st.success(f"Prepared reference: {ref_display_name}")
-                st.audio(speaker_path)
-                y, sr = librosa.load(speaker_path, sr=None, mono=True)
-                dur = len(y) / sr if sr else 0.0
-                if dur < 8:
-                    st.info("ℹ️ Reference is quite short (<8s). Longer samples often clone better.")
-                elif dur > 60:
-                    st.info("ℹ️ Reference is long (>60s). 20–30s usually works well.")
-                st.session_state.speaker_path = speaker_path
-                st.session_state.ref_display_name = ref_display_name
-            except Exception as e:
-                st.error(f"Upload error: {e}")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- Use saved voice from gallery
-elif voice_option == "Use voice from gallery":
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    existing_refs = get_voice_gallery()
-    if existing_refs:
-        cols = st.columns([3, 2])
-        with cols[0]:
-            use_existing = st.selectbox("Saved voices", existing_refs)
-        with cols[1]:
-            if st.button("🗑️ Delete selected voice", use_container_width=True):
-                try:
-                    os.remove(os.path.join(VOICES_DIR, use_existing))
-                    st.success(f"Deleted {use_existing}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Delete failed: {e}")
-        if existing_refs:
-            speaker_path = os.path.join(VOICES_DIR, use_existing)
-            ref_display_name = use_existing
-            st.audio(speaker_path)
-            st.session_state.speaker_path = speaker_path
-            st.session_state.ref_display_name = ref_display_name
-    else:
-        st.warning("No saved voices yet. Upload or record one.")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- Record live in browser
-elif voice_option == "Record live":
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("🎤 Record your voice in browser")
-
-    # Call recorder component - it may return None or a DeltaGenerator during initial renders.
-    recorded_b64 = audio_recorder_component()
-
-    # IMPORTANT: components.html can sometimes return a DeltaGenerator or None on initial runs.
-    # Only accept/process the value when it's a string (dataURL). Store it in session_state.
-    if isinstance(recorded_b64, str) and recorded_b64.strip():
-        st.session_state.recorded_b64 = recorded_b64
-
-    # If we have a recorded base64 in session_state, process it (save, normalize, etc.)
-    if st.session_state.get("recorded_b64"):
-        with st.spinner("Processing recorded audio..."):
-            try:
-                # Use helper to convert dataURL -> WAV mono16k and save to voices/
-                new_path = save_audio_from_base64(st.session_state.recorded_b64)
-                if new_path:
-                    speaker_path = new_path
-                    ref_display_name = os.path.basename(new_path)
-                    st.success(f"Prepared reference: {ref_display_name}")
-                    st.audio(speaker_path)
-                    st.session_state.speaker_path = speaker_path
-                    st.session_state.ref_display_name = ref_display_name
-                    # Clear recorded_b64 if you prefer one-time processing:
-                    # st.session_state.recorded_b64 = None
-            except Exception as e:
-                st.error(f"Recording error: {e}")
-
-    st.markdown("---")
-    st.markdown("### 📤 Or upload a recording")
-    fallback_upload = st.file_uploader(
-        "Upload your recorded voice",
-        type=["wav", "mp3", "m4a", "flac", "ogg"],
-        key="fallback_upload"
-    )
-
-    if fallback_upload:
-        file_bytes = fallback_upload.read()
-        with st.spinner("Processing uploaded recording..."):
-            try:
-                speaker_path = ensure_wav_mono16(file_bytes, fallback_upload.name, do_trim=True, trim_db=28)
-                ref_display_name = os.path.basename(speaker_path)
-                st.success(f"Prepared reference: {ref_display_name}")
-                st.audio(speaker_path)
-                st.session_state.speaker_path = speaker_path
-                st.session_state.ref_display_name = ref_display_name
-            except Exception as e:
-                st.error(f"Upload error: {e}")
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown("---")
-
-# -----------------------------
-# Generate Voice
-# -----------------------------
-st.markdown("### 🎙️ Generate")
-
-btn_col1, btn_col2 = st.columns([1, 1])
-with btn_col1:
-    generate_disabled = (not text.strip()) or (not st.session_state.speaker_path)
-    generate = st.button("🎬 Generate Voice", type="primary", use_container_width=True, disabled=generate_disabled)
-with btn_col2:
-    if st.button("♻️ Reset UI", use_container_width=True):
-        # Reset only the states we want cleared
-        st.session_state.speaker_path = None
-        st.session_state.ref_display_name = None
-        st.session_state.recorded_b64 = None
-        st.rerun()
-
-if generate and st.session_state.speaker_path:
-    t0 = time.time()
-    with st.spinner("Synthesizing..."):
-        try:
-            tts = load_tts_model()
-            out_wav = synthesize(
-                tts, text.strip(), st.session_state.speaker_path,
-                language=language, style=style,
-                speed_adv=speed_adv, emotion_adv=emotion_adv
+        # Style selection
+        style = st.radio(
+            "Voice style", 
+            options=["neutral", "fast", "expressive"], 
+            index=0,
+            help="Choose a preset voice style"
+        )
+        
+        # Advanced controls
+        advanced_mode = st.checkbox("Advanced controls", value=False)
+        speed_override = None
+        emotion_override = None
+        
+        if advanced_mode:
+            speed_override = st.slider(
+                "Speed", 
+                min_value=0.8, 
+                max_value=1.5, 
+                value=1.0, 
+                step=0.01,
+                help="Adjust speaking speed (0.8 = slower, 1.5 = faster)"
             )
-            final_wav = out_wav
-            if normalize_out:
-                try:
-                    final_wav = normalize_loudness(out_wav)
-                except Exception:
-                    final_wav = out_wav
+            emotion_override = st.selectbox(
+                "Emotion", 
+                options=["None", "happy", "sad", "angry", "surprised", "fearful"], 
+                index=0,
+                help="Add emotional expression to the voice"
+            )
 
-            extras = {
-                "device": DEVICE,
-                "normalized": normalize_out,
-                "speed": speed_adv,
-                "emotion": emotion_adv,
-                "stability": voice_stability,
-                "similarity": voice_similarity
-            }
-            save_generation_meta(final_wav, text.strip(), language, style, st.session_state.ref_display_name, extras)
+        st.markdown("---")
+        
+        # Voice quality settings
+        st.markdown("**Voice Quality Settings**")
+        voice_stability = st.slider(
+            "Voice stability", 
+            min_value=0.0, 
+            max_value=1.0, 
+            value=0.5, 
+            step=0.1,
+            help="Higher values make voice more stable but less expressive"
+        )
+        voice_similarity = st.slider(
+            "Voice similarity", 
+            min_value=0.0, 
+            max_value=1.0, 
+            value=0.75, 
+            step=0.1,
+            help="Higher values make output more similar to reference voice"
+        )
 
-            st.success(f"✅ Done in {time.time() - t0:.1f}s")
-            col_wav, col_mp3 = st.columns(2)
-            with col_wav:
-                st.markdown("**WAV**")
-                st.audio(final_wav, format="audio/wav")
-                with open(final_wav, "rb") as f:
-                    st.download_button("⬇️ Download WAV", data=f.read(),
-                                       file_name=os.path.basename(final_wav), mime="audio/wav", use_container_width=True)
-            with col_mp3:
-                st.markdown("**MP3**")
-                try:
-                    out_mp3 = convert_to_mp3(final_wav)
-                    st.audio(out_mp3, format="audio/mpeg")
-                    with open(out_mp3, "rb") as f:
-                        st.download_button("⬇️ Download MP3", data=f.read(),
-                                           file_name=os.path.basename(out_mp3), mime="audio/mpeg", use_container_width=True)
-                except Exception as e:
-                    st.warning(f"MP3 export unavailable: {e}")
+        # Output options
+        normalize_output = st.checkbox(
+            "Normalize output loudness", 
+            value=True,
+            help="Normalize audio loudness for consistent volume"
+        )
+        
+        # Device info
+        st.markdown(f"**Device:** `{DEVICE}`")
 
+        st.markdown("---")
+        
+        # Active voice indicator
+        st.markdown("**Active Voice**")
+        if st.session_state.get("active_voice"):
+            active_voice = st.session_state.active_voice
+            st.markdown(
+                f"<span class='active-badge'>{active_voice}</span>", 
+                unsafe_allow_html=True
+            )
+            if st.button("Clear active voice", use_container_width=True):
+                st.session_state.active_voice = None
+                st.session_state.speaker_path = None
+                st.session_state.ref_display_name = None
+                st.success("Active voice cleared")
+                st.rerun()
+        else:
+            st.info("No active voice selected")
+
+        st.markdown("---")
+        
+        # Model loading button
+        if st.button("🚀 Load / Warm up model", use_container_width=True):
+            start_time = time.time()
+            with st.spinner("Loading XTTS model..."):
+                _ = load_tts_model()
+            load_time = time.time() - start_time
+            st.success(f"Model ready on {DEVICE} in {load_time:.1f}s")
+
+    return {
+        "language": language,
+        "style": style,
+        "speed_override": speed_override,
+        "emotion_override": emotion_override,
+        "voice_stability": voice_stability,
+        "voice_similarity": voice_similarity,
+        "normalize_output": normalize_output
+    }
+
+# =============================================================================
+# VOICE SELECTION INTERFACE
+# =============================================================================
+
+def create_voice_selection_interface():
+    """Create the voice selection interface with upload and gallery options."""
+    st.markdown("### 🎵 Choose Reference Voice")
+
+    voice_option = st.radio(
+        "Select input method",
+        options=["Upload new voice", "Use voice from gallery"],
+        horizontal=True
+    )
+
+    if voice_option == "Upload new voice":
+        handle_voice_upload()
+    else:
+        handle_voice_gallery()
+
+
+def handle_voice_upload():
+    """Handle new voice file upload and processing."""
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    
+    uploaded_file = st.file_uploader(
+        "Upload reference voice (20–30s of clean speech recommended)",
+        type=["wav", "mp3", "m4a", "flac", "ogg"],
+        help="Upload a clear recording of the voice you want to clone"
+    )
+    
+    # Audio processing options
+    col1, col2 = st.columns(2)
+    with col1:
+        trim_silence_option = st.checkbox(
+            "Trim long silences from reference", 
+            value=True,
+            help="Remove silent portions from the beginning and end"
+        )
+    with col2:
+        trim_sensitivity = st.slider(
+            "Trim sensitivity (dB)", 
+            min_value=20, 
+            max_value=40, 
+            value=28,
+            help="Higher values remove more quiet sounds"
+        )
+    
+    if uploaded_file:
+        try:
+            file_bytes = uploaded_file.read()
+            with st.spinner("Preprocessing uploaded voice..."):
+                processed_path = preprocess_audio_file(
+                    file_bytes, 
+                    do_trim=trim_silence_option, 
+                    trim_db=trim_sensitivity
+                )
+                
+                reference_name = os.path.basename(processed_path)
+                st.success(f"✅ Prepared reference: {reference_name}")
+                
+                # Display audio player
+                st.audio(processed_path)
+                
+                # Show audio duration info
+                audio_data, sample_rate = librosa.load(processed_path, sr=None, mono=True)
+                duration = len(audio_data) / sample_rate if sample_rate else 0.0
+                
+                if duration < 8:
+                    st.info("ℹ️ Reference is quite short (<8s). Longer samples often produce better clones.")
+                elif duration > 60:
+                    st.info("ℹ️ Reference is long (>60s). 20–30s usually works optimally.")
+                
+                # Update session state
+                st.session_state.speaker_path = processed_path
+                st.session_state.ref_display_name = reference_name
+                st.session_state.active_voice = reference_name
+                st.session_state.recording_processed = False
+                
         except Exception as e:
-            st.error(f"Generation failed: {e}")
+            st.error(f"❌ Upload processing failed: {str(e)}")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown("---")
 
-# -----------------------------
-# Recent Generations Gallery
-# -----------------------------
-st.markdown("### 📁 Recent Generations")
-metas = load_recent_meta(RECENTS_LIMIT)
-if not metas:
-    st.info("No generations yet. Create one to see it here.")
-else:
-    for m in metas:
-        with st.expander(f"🕒 {m['created']} • {m['language']} • {m['style']} • ref: {m.get('reference') or '—'}"):
-            wav_path = os.path.join(OUTPUTS_DIR, m["wav"])
-            cols = st.columns([2, 1])
-            with cols[0]:
-                st.markdown("**Preview**")
-                if os.path.exists(wav_path):
-                    st.audio(wav_path)
-                else:
-                    st.error("Original WAV missing.")
-            with cols[1]:
-                if os.path.exists(wav_path):
-                    with open(wav_path, "rb") as f:
-                        st.download_button("⬇️ WAV", data=f.read(), file_name=os.path.basename(wav_path), mime="audio/wav", use_container_width=True)
-                if st.button("🔁 Re-synthesize with same settings", key=m["id"]):
-                    try:
-                        tts = load_tts_model()
-                        ref_file = None
-                        if m.get("reference"):
-                            ref_candidate = os.path.join(VOICES_DIR, m["reference"])
-                            if os.path.exists(ref_candidate):
-                                ref_file = ref_candidate
-                        if not ref_file:
-                            st.error("Original reference voice not found in gallery.")
-                        else:
-                            out_wav2 = synthesize(
-                                tts, m["text"], ref_file,
-                                language=m["language"],
-                                style=m["style"],
-                                speed_adv=m.get("extras", {}).get("speed"),
-                                emotion_adv=m.get("extras", {}).get("emotion"),
-                            )
-                            final2 = out_wav2
-                            if m.get("extras", {}).get("normalized", False):
-                                try:
-                                    final2 = normalize_loudness(out_wav2)
-                                except Exception:
-                                    final2 = out_wav2
-                            save_generation_meta(final2, m["text"], m["language"], m["style"], m.get("reference"), m.get("extras"))
-                            st.success("Re-synthesis done.")
-                            st.audio(final2)
-                    except Exception as e:
-                        st.error(f"Re-synthesis failed: {e}")
+def handle_voice_gallery():
+    """Handle voice selection from the saved gallery."""
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    
+    existing_voices = get_voice_gallery()
+    
+    if existing_voices:
+        # Voice selection dropdown
+        selected_voice = st.selectbox(
+            "Choose from saved voices", 
+            options=existing_voices,
+            key="gallery_select",
+            help="Select a previously saved voice from your gallery"
+        )
+        
+        if selected_voice:
+            voice_path = os.path.join(VOICES_DIR, selected_voice)
+            st.audio(voice_path)
+            
+            # Update session state but don't set as active automatically
+            st.session_state.speaker_path = voice_path
+            st.session_state.ref_display_name = selected_voice
+            st.session_state.recording_processed = False
 
-st.markdown("---")
+        st.markdown("---")
+        create_voice_gallery_management(existing_voices)
+        
+    else:
+        st.warning("📁 No saved voices found. Upload or record a voice to get started.")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# -----------------------------
-# Tips
-# -----------------------------
-with st.expander("🧪 Tips for natural sounding voice"):
-    st.markdown("""
-**For more natural sounding voice:**
 
-1. **Reference Audio Quality:**
-   - Use 20-30 seconds of clean, single-speaker audio
-   - Record in a quiet environment with minimal background noise
-   - Use a good quality microphone
+def create_voice_gallery_management(existing_voices: List[str]):
+    """Create the voice gallery management interface."""
+    st.subheader("🎵 Voice Gallery")
+    
+    # Batch delete controls
+    batch_col1, batch_col2 = st.columns([3, 1])
+    with batch_col1:
+        st.markdown("**Batch Operations** (optional)")
+        selected_for_deletion = st.multiselect(
+            "Select voices for batch deletion",
+            options=existing_voices,
+            key="batch_select",
+            help="Select multiple voices to delete at once"
+        )
+        st.session_state.batch_delete = selected_for_deletion
+        
+    with batch_col2:
+        if st.session_state.batch_delete:
+            if not st.session_state.confirm_batch_delete:
+                if st.button("🗑️ Delete Selected", use_container_width=True):
+                    st.session_state.confirm_batch_delete = True
+                    st.rerun()
+            else:
+                st.warning(f"⚠️ Delete {len(st.session_state.batch_delete)} files?")
+                if st.button("✅ Confirm Delete", use_container_width=True):
+                    deleted_count = 0
+                    for filename in list(st.session_state.batch_delete):
+                        if delete_voice_file(filename):
+                            deleted_count += 1
+                    
+                    st.session_state.batch_delete = []
+                    st.session_state.confirm_batch_delete = False
+                    st.success(f"✅ Deleted {deleted_count} files")
+                    st.rerun()
+                    
+                if st.button("❌ Cancel", use_container_width=True):
+                    st.session_state.confirm_batch_delete = False
+                    st.rerun()
+        else:
+            st.info("No selections")
 
-2. **Text Input:**
-   - Use proper punctuation (commas, periods, question marks)
-   - Break long sentences into shorter ones
-   - Use natural phrasing and contractions ("don't" instead of "do not")
+    # Individual voice management
+    st.markdown("**Individual Voice Controls**")
+    for voice_filename in existing_voices:
+        voice_path = os.path.join(VOICES_DIR, voice_filename)
+        is_active = voice_filename == st.session_state.get("active_voice")
+        
+        # Voice name with active indicator
+        if is_active:
+            st.markdown(f"**✅ {voice_filename} (Active)**")
+        else:
+            st.markdown(f"🎵 {voice_filename}")
+        
+        # Controls layout
+        control_cols = st.columns([3, 1, 1])
+        
+        with control_cols[0]:
+            st.audio(voice_path)
+            
+        with control_cols[1]:
+            if not is_active:
+                if st.button("🎯 Set Active", key=f"activate_{voice_filename}"):
+                    st.session_state.speaker_path = voice_path
+                    st.session_state.ref_display_name = voice_filename
+                    st.session_state.active_voice = voice_filename
+                    st.success(f"✅ Activated {voice_filename}")
+                    st.rerun()
+            else:
+                st.success("✅ Active")
+                
+        with control_cols[2]:
+            # Delete confirmation flow
+            if st.session_state.pending_delete == voice_filename:
+                confirm_col1, confirm_col2 = st.columns([1, 1])
+                with confirm_col1:
+                    if st.button("✅", key=f"confirm_del_{voice_filename}"):
+                        if delete_voice_file(voice_filename):
+                            st.success(f"Deleted {voice_filename}")
+                        st.session_state.pending_delete = None
+                        st.rerun()
+                with confirm_col2:
+                    if st.button("❌", key=f"cancel_del_{voice_filename}"):
+                        st.session_state.pending_delete = None
+                        st.rerun()
+            else:
+                if st.button("🗑️", key=f"delete_{voice_filename}"):
+                    st.session_state.pending_delete = voice_filename
+                    st.rerun()
+        
+        st.markdown("---")
 
-3. **Settings:**
-   - Use "neutral" style for most natural results
-   - Adjust speed to 0.9-1.1 for more natural pacing
-   - Try different emotions for different contexts
-   - Increase voice stability for consistent output
-   - Increase voice similarity to match reference more closely
+# =============================================================================
+# SPEECH GENERATION INTERFACE
+# =============================================================================
 
-4. **Reference Speech:**
-   - Use reference audio with similar emotion to desired output
-   - Match the speaking style (conversational, narrative, etc.)
-   - Ensure reference audio has clear pronunciation
+def create_generation_interface(settings: Dict[str, Any]):
+    """Create the speech generation interface."""
+    st.markdown("### 🎙️ Generate Speech")
 
-**For browser recording:**
-- Chrome/Firefox recommended
-- Allow microphone permissions when prompted
-- Speak clearly and consistently at a steady distance
-- Record in a quiet environment
-    """)
+    # Generation controls
+    control_col1, control_col2 = st.columns([1, 1])
+    
+    with control_col1:
+        generation_disabled = (
+            not st.session_state.get("speaker_path") or 
+            not st.text_area_value.strip()
+        )
+        
+        generate_clicked = st.button(
+            "🎬 Generate Voice", 
+            type="primary",
+            use_container_width=True,
+            disabled=generation_disabled,
+            help="Generate speech using the selected reference voice"
+        )
+        
+    with control_col2:
+        if st.button("♻️ Reset Interface", use_container_width=True):
+            # Reset relevant session state
+            reset_keys = [
+                "speaker_path", "ref_display_name", "recorded_b64",
+                "recording_processed", "active_voice"
+            ]
+            for key in reset_keys:
+                st.session_state[key] = None
+            st.rerun()
+
+    # Handle generation
+    if generate_clicked and st.session_state.speaker_path:
+        handle_speech_generation(settings)
+
+
+def handle_speech_generation(settings: Dict[str, Any]):
+    """Handle the speech generation process."""
+    start_time = time.time()
+    
+    with st.spinner("🎭 Synthesizing speech..."):
+        try:
+            # Load TTS model
+            tts_model = load_tts_model()
+            
+            # Generate speech
+            output_wav = synthesize_speech(
+                tts_model=tts_model,
+                text=st.text_area_value.strip(),
+                speaker_wav_path=st.session_state.speaker_path,
+                language=settings["language"],
+                style=settings["style"],
+                speed_override=settings["speed_override"],
+                emotion_override=settings["emotion_override"]
+            )
+            
+            # Apply loudness normalization if requested
+            final_wav = output_wav
+            if settings["normalize_output"]:
+                try:
+                    final_wav = normalize_audio_loudness(output_wav)
+                except Exception:
+                    st.warning("⚠️ Loudness normalization failed, using original audio")
+                    final_wav = output_wav
+
+            # Save generation metadata
+            metadata_extras = {
+                "device": DEVICE,
+                "normalized": settings["normalize_output"],
+                "speed": settings["speed_override"],
+                "emotion": settings["emotion_override"],
+                "stability": settings["voice_stability"],
+                "similarity": settings["voice_similarity"]
+            }
+            
+            save_generation_metadata(
+                output_wav_path=final_wav,
+                text=st.text_area_value.strip(),
+                language=settings["language"],
+                style=settings["style"],
+                reference_name=st.session_state.ref_display_name,
+                extras=metadata_extras
+            )
+
+            generation_time = time.time() - start_time
+            st.success(f"✅ Generation completed in {generation_time:.1f} seconds")
+            
+            # Display results
+            display_generation_results(final_wav)
+            
+        except Exception as e:
+            st.error(f"❌ Generation failed: {str(e)}")
+
+
+def display_generation_results(wav_path: str):
+    """Display the generated audio results with download options."""
+    result_col1, result_col2 = st.columns(2)
+    
+    with result_col1:
+        st.markdown("**🎵 WAV Audio**")
+        st.audio(wav_path, format="audio/wav")
+        
+        with open(wav_path, "rb") as wav_file:
+            st.download_button(
+                label="⬇️ Download WAV",
+                data=wav_file.read(),
+                file_name=os.path.basename(wav_path),
+                mime="audio/wav",
+                use_container_width=True
+            )
+    
+    with result_col2:
+        st.markdown("**🎵 MP3 Audio**")
+        try:
+            mp3_path = convert_wav_to_mp3(wav_path)
+            st.audio(mp3_path, format="audio/mpeg")
+            
+            with open(mp3_path, "rb") as mp3_file:
+                st.download_button(
+                    label="⬇️ Download MP3",
+                    data=mp3_file.read(),
+                    file_name=os.path.basename(mp3_path),
+                    mime="audio/mpeg",
+                    use_container_width=True
+                )
+        except Exception as e:
+            st.warning(f"⚠️ MP3 conversion unavailable: {str(e)}")
+
+# =============================================================================
+# RECENT GENERATIONS GALLERY
+# =============================================================================
+
+def create_recent_generations_gallery():
+    """Create the recent generations gallery interface."""
+    st.markdown("### 📁 Recent Generations")
+    
+    recent_metadata = load_recent_metadata(RECENTS_LIMIT)
+    
+    if not recent_metadata:
+        st.info("🎭 No generations yet. Create your first voice clone to see it here!")
+        return
+    
+    for metadata in recent_metadata:
+        create_generation_entry(metadata)
+
+
+def create_generation_entry(metadata: Dict[str, Any]):
+    """Create a single generation entry in the gallery."""
+    # Format creation time
+    created_time = metadata.get('created', 'Unknown')
+    language = metadata.get('language', 'Unknown')
+    style = metadata.get('style', 'Unknown')
+    reference = metadata.get('reference', 'Unknown')
+    
+    # Create expandable entry
+    with st.expander(
+        f"🕒 {created_time} • {language} • {style} • ref: {reference}"
+    ):
+        wav_filename = metadata.get("wav", "")
+        wav_path = os.path.join(OUTPUTS_DIR, wav_filename)
+        
+        entry_cols = st.columns([2, 1])
+        
+        with entry_cols[0]:
+            st.markdown("**Audio Preview**")
+            if os.path.exists(wav_path):
+                st.audio(wav_path)
+                
+                # Display generation text (truncated)
+                generation_text = metadata.get("text", "")
+                if generation_text:
+                    display_text = (
+                        generation_text[:200] + "..." 
+                        if len(generation_text) > 200 
+                        else generation_text
+                    )
+                    st.markdown(f"**Text:** {display_text}")
+            else:
+                st.error("⚠️ Original audio file not found")
+        
+        with entry_cols[1]:
+            # Download button
+            if os.path.exists(wav_path):
+                with open(wav_path, "rb") as audio_file:
+                    st.download_button(
+                        label="⬇️ Download WAV",
+                        data=audio_file.read(),
+                        file_name=wav_filename,
+                        mime="audio/wav",
+                        use_container_width=True
+                    )
+            
+            # Re-synthesis button
+            if st.button(
+                "🔁 Re-synthesize", 
+                key=f"resynth_{metadata.get('id', 'unknown')}",
+                help="Generate again with the same settings"
+            ):
+                handle_resynthesis(metadata)
+
+
+def handle_resynthesis(metadata: Dict[str, Any]):
+    """Handle re-synthesis of a previous generation."""
+    try:
+        reference_name = metadata.get("reference")
+        if not reference_name:
+            st.error("❌ No reference voice information found")
+            return
+            
+        reference_path = os.path.join(VOICES_DIR, reference_name)
+        if not os.path.exists(reference_path):
+            st.error(f"❌ Reference voice '{reference_name}' not found in gallery")
+            return
+        
+        # Load TTS model and re-synthesize
+        tts_model = load_tts_model()
+        extras = metadata.get("extras", {})
+        
+        new_output = synthesize_speech(
+            tts_model=tts_model,
+            text=metadata.get("text", ""),
+            speaker_wav_path=reference_path,
+            language=metadata.get("language", "en"),
+            style=metadata.get("style", "neutral"),
+            speed_override=extras.get("speed"),
+            emotion_override=extras.get("emotion")
+        )
+        
+        # Apply normalization if it was used originally
+        final_output = new_output
+        if extras.get("normalized", False):
+            try:
+                final_output = normalize_audio_loudness(new_output)
+            except Exception:
+                final_output = new_output
+        
+        # Save new metadata
+        save_generation_metadata(
+            output_wav_path=final_output,
+            text=metadata.get("text", ""),
+            language=metadata.get("language", "en"),
+            style=metadata.get("style", "neutral"),
+            reference_name=reference_name,
+            extras=extras
+        )
+        
+        st.success("✅ Re-synthesis completed!")
+        st.audio(final_output)
+        
+    except Exception as e:
+        st.error(f"❌ Re-synthesis failed: {str(e)}")
+
+# =============================================================================
+# HELP AND TIPS SECTION
+# =============================================================================
+
+def create_tips_section():
+    """Create the tips and help section."""
+    with st.expander("💡 Tips for Best Results"):
+        st.markdown("""
+        **🎯 For Natural-Sounding Voice Clones:**
+
+        **1. Reference Audio Quality**
+        - Use 20-30 seconds of clean, single-speaker audio
+        - Record in a quiet environment with minimal background noise
+        - Ensure consistent volume and clear pronunciation
+        - Use a quality microphone if possible
+
+        **2. Text Input Best Practices**
+        - Use proper punctuation (periods, commas, question marks)
+        - Break very long sentences into shorter, natural phrases
+        - Use contractions and natural language ("don't" vs "do not")
+        - Match the style of your reference audio (formal vs casual)
+
+        **3. Optimal Settings**
+        - **Neutral style** works best for most use cases
+        - Adjust **speed** between 0.9-1.1 for natural pacing
+        - Use **emotions** sparingly and match your reference tone
+        - Increase **voice stability** for consistent output
+        - Increase **voice similarity** to match reference more closely
+
+        **4. Reference Speech Guidelines**
+        - Use reference audio with similar emotion to desired output
+        - Match speaking style (conversational, narrative, etc.)
+        - Ensure clear articulation and consistent pacing
+        - Avoid background music or multiple speakers
+
+        **5. Browser Recording Tips**
+        - Chrome and Firefox work best for recording
+        - Allow microphone permissions when prompted  
+        - Speak at consistent distance from microphone
+        - Record in quiet environment without echo
+        - Test your microphone before important recordings
+
+        **6. Troubleshooting**
+        - If output sounds robotic, try a longer reference sample
+        - If voice doesn't match, increase voice similarity setting
+        - For inconsistent results, increase voice stability
+        - MP3 export requires FFmpeg installation
+        """)
+
+# =============================================================================
+# MAIN APPLICATION
+# =============================================================================
+
+def main():
+    """Main application function."""
+    # Application header
+    st.title("🗣️ AI Voice Cloner")
+    st.caption(
+        "Powered by Coqui XTTS v2 • Upload 20-30 seconds of clean reference speech for best results"
+    )
+
+    # Text input section
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown("### 📝 Text to Synthesize")
+    
+    # Use a global text area that persists across reruns
+    if "text_input" not in st.session_state:
+        st.session_state.text_input = (
+            "Hello! This is my cloned voice running from a Streamlit web application. "
+            "The voice should sound natural and expressive with proper intonation."
+        )
+    
+    text_input = st.text_area(
+        label="Enter the text you want to convert to speech",
+        value=st.session_state.text_input,
+        height=120,
+        label_visibility="collapsed",
+        help="Enter clear, well-punctuated text for best results. Avoid extremely long sentences.",
+        key="text_area"
+    )
+    
+    # Store text area value globally for access in other functions
+    st.text_area_value = text_input
+    st.session_state.text_input = text_input
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("---")
+
+    # Get sidebar settings
+    settings = create_sidebar()
+
+    # Voice selection interface
+    create_voice_selection_interface()
+    st.markdown("---")
+
+    # Speech generation interface
+    create_generation_interface(settings)
+    st.markdown("---")
+
+    # Recent generations gallery
+    create_recent_generations_gallery()
+    st.markdown("---")
+
+    # Tips and help
+    create_tips_section()
+
+
+# Run the application
+if __name__ == "__main__":
+    main()
