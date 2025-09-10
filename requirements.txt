@@ -1,18 +1,24 @@
-# Core web framework
-streamlit>=1.36.0
+# AI Voice Cloner (XTTS v2) - Requirements
+# Python 3.8+ required
 
-# Streamlit custom components
-streamlit-option-menu>=0.3.12
-
-# Audio handling
-pydub>=0.25.1
-soundfile>=0.12.1
-librosa>=0.10.2.post1
-numpy>=1.26.4
-
-# Text-to-speech (Coqui XTTS v2)
+# Core dependencies
+streamlit>=1.28.0
 TTS>=0.22.0
 
-# Utilities
-requests>=2.31.0
-python-dotenv>=1.0.1
+# Audio processing
+librosa>=0.10.0
+soundfile>=0.12.0
+pydub>=0.25.0
+numpy>=1.21.0
+
+# Scientific computing
+scipy>=1.9.0
+
+# Optional GPU support (uncomment if using CUDA)
+# torch>=2.0.0+cu118
+# torchaudio>=2.0.0+cu118
+
+# Development and testing (optional)
+# pytest>=7.0.0
+# black>=23.0.0
+# flake8>=6.0.0
