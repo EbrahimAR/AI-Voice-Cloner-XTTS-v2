@@ -1,18 +1,30 @@
 # 🗣️ AI Voice Cloner (XTTS v2)
 
 A **Streamlit web app** for cloning voices using [Coqui TTS](https://github.com/coqui-ai/TTS).  
-Supports uploading, recording, or selecting reference voices and generating natural-sounding speech in multiple languages.
+Upload or record reference voices, fine-tune style & settings, and generate natural-sounding speech in 16+ languages — all through a clean, dark-themed interface.
 
 ---
 
 ## 🚀 Features
-- 🎤 Record voice directly in the browser
-- 📤 Upload reference voice samples (WAV, MP3, M4A, OGG, FLAC)
-- 🎵 Save and reuse voices from a gallery
-- 🌎 Multilingual support (English, Spanish, French, German, Chinese, Japanese, etc.)
-- 🎭 Control speech style, speed, and emotion
-- 📂 Keep track of recent generations with playback & downloads
-- 📥 Export audio as WAV or MP3
+- 📁 **Voice gallery management** 
+  - Upload, record, save, activate, and delete reference voices
+  - Batch delete multiple voices at once
+  - Preview and switch between saved voices
+- 🌍 **Multi-language support** 
+  - 16+ languages including English, Spanish, French, German, Chinese, Japanese, and more
+- 🎭 **Voice style controls** 
+  - Choose between neutral, fast, and expressive styles
+  - Optional speed and emotion overrides (happy, sad, angry, surprised, fearful)
+- ⚙️ **Advanced settings** 
+  - Control voice stability and similarity for better cloning accuracy
+  - Toggle loudness normalization for consistent output
+- 📊 **Generation history** 
+  - Automatic metadata saving (text, style, reference voice, timestamp)
+  - Recent generations gallery with preview, download, and re-synthesize option
+- 💾 **Multiple export formats** 
+  - Download results as WAV or MP3 (requires FFmpeg)
+- 🎨 **Modern dark UI** 
+  - Custom-styled Streamlit interface with smooth UX and mobile-friendly layout
 
 ---
 
@@ -20,6 +32,8 @@ Supports uploading, recording, or selecting reference voices and generating natu
 ### **Frontend / UI**
   - [Streamlit](https://streamlit.io/): Web interface for interaction and real-time updates
   - **streamlit-option-menu**: Sidebar navigation with a clean UI
+  - Custom CSS styling for dark mode & better UX
+  - HTML5 `MediaRecorder` for in-browser recording
 
 ### **Backend / Logic**
   - [Coqui TTS (XTTS v2)](https://github.com/coqui-ai/TTS): Voice cloning & text-to-speech model
@@ -28,13 +42,8 @@ Supports uploading, recording, or selecting reference voices and generating natu
   - **NumPy**: Array and numerical operations
 
 ### **Utilities**
-  - **requests**: API calls (if extending functionality)
-  - **python-dotenv**: Manage secrets/API keys
   - **ffmpeg (system dependency)**: Required for audio encoding/decoding
-
-### **Environment**
-  - **requests**: API calls (if extending functionality)
-  - Virtual Environment (`venv/`) for dependency isolation
+  - **streamlit.components.v1** – custom recorder integration
 
 ---
 
@@ -49,7 +58,6 @@ Supports uploading, recording, or selecting reference voices and generating natu
     │
     ├── app.py                    # Main Streamlit application
     ├── run_app.py                # Launcher (cross-platform, auto-opens browser)
-    ├── test.py                   # Experimental/testing script
     ├── requirements.txt          # Python dependencies
     ├── LICENSE                   # Open-source license
     ├── .gitignore                # Ignored files/folders
@@ -104,9 +112,7 @@ App will open at: http://localhost:8502
 ## 👨‍💻 Author
 Ebrahim Abdul Raoof
 
-[LinkedIn](https://www.linkedin.com/in/ebrahim-ar/)
-
-[GitHub](https://github.com/EbrahimAR)
+[LinkedIn](https://www.linkedin.com/in/ebrahim-ar/) | [GitHub](https://github.com/EbrahimAR)
 
 ---
 
