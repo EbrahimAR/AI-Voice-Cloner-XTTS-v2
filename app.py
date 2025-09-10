@@ -3,8 +3,7 @@
 AI Voice Cloner using Coqui XTTS v2
 
 A Streamlit web application for voice cloning using the XTTS v2 model.
-Users can upload reference audio or record their own voice to clone,
-then generate speech in the cloned voice from text input.
+Users can upload reference audio, then generate speech in the cloned voice from text input.
 
 Requirements:
 - Python 3.8+
@@ -999,7 +998,6 @@ def handle_voice_upload():
     
     st.markdown('</div>', unsafe_allow_html=True)
 
-
 def handle_voice_gallery():
     """Handle voice selection from the saved gallery."""
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -1007,28 +1005,13 @@ def handle_voice_gallery():
     existing_voices = get_voice_gallery()
     
     if existing_voices:
-        # Voice selection dropdown
-        selected_voice = st.selectbox(
-            "Choose from saved voices", 
-            options=existing_voices,
-            key="gallery_select",
-            help="Select a previously saved voice from your gallery"
-        )
+        st.markdown("**Available Voices** - Click 'Set Active' to use a voice for generation")
         
-        if selected_voice:
-            voice_path = os.path.join(VOICES_DIR, selected_voice)
-            st.audio(voice_path)
-            
-            # Update session state but don't set as active automatically
-            st.session_state.speaker_path = voice_path
-            st.session_state.ref_display_name = selected_voice
-            st.session_state.recording_processed = False
-
         st.markdown("---")
         create_voice_gallery_management(existing_voices)
         
     else:
-        st.warning("📁 No saved voices found. Upload or record a voice to get started.")
+        st.warning("📁 No saved voices found. Upload a voice to get started.")
     
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1098,6 +1081,7 @@ def create_voice_gallery_management(existing_voices: List[str]):
                     st.session_state.speaker_path = voice_path
                     st.session_state.ref_display_name = voice_filename
                     st.session_state.active_voice = voice_filename
+                    st.session_state.recording_processed = False  # Reset recording flag
                     st.success(f"✅ Activated {voice_filename}")
                     st.rerun()
             else:
@@ -1222,7 +1206,6 @@ def handle_speech_generation(settings: Dict[str, Any]):
         except Exception as e:
             st.error(f"❌ Generation failed: {str(e)}")
 
-
 def display_generation_results(wav_path: str):
     """Display the generated audio results with download options."""
     result_col1, result_col2 = st.columns(2)
@@ -1233,12 +1216,13 @@ def display_generation_results(wav_path: str):
         
         with open(wav_path, "rb") as wav_file:
             st.download_button(
-                label="⬇️ Download WAV",
+                "⬇️ Download WAV",
                 data=wav_file.read(),
                 file_name=os.path.basename(wav_path),
                 mime="audio/wav",
-                use_container_width=True
+                key=f"download_wav_{os.path.basename(wav_path)}"  # Added _wav prefix
             )
+
     
     with result_col2:
         st.markdown("**🎵 MP3 Audio**")
@@ -1248,11 +1232,11 @@ def display_generation_results(wav_path: str):
             
             with open(mp3_path, "rb") as mp3_file:
                 st.download_button(
-                    label="⬇️ Download MP3",
+                    "⬇️ Download MP3",
                     data=mp3_file.read(),
                     file_name=os.path.basename(mp3_path),
                     mime="audio/mpeg",
-                    use_container_width=True
+                    key=f"download_mp3_{os.path.basename(wav_path)}"  # Added _mp3 prefix
                 )
         except Exception as e:
             st.warning(f"⚠️ MP3 conversion unavailable: {str(e)}")
@@ -1416,14 +1400,7 @@ def create_tips_section():
         - Ensure clear articulation and consistent pacing
         - Avoid background music or multiple speakers
 
-        **5. Browser Recording Tips**
-        - Chrome and Firefox work best for recording
-        - Allow microphone permissions when prompted  
-        - Speak at consistent distance from microphone
-        - Record in quiet environment without echo
-        - Test your microphone before important recordings
-
-        **6. Troubleshooting**
+        **5. Troubleshooting**
         - If output sounds robotic, try a longer reference sample
         - If voice doesn't match, increase voice similarity setting
         - For inconsistent results, increase voice stability
